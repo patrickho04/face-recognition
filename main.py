@@ -13,8 +13,10 @@ folderModePath = 'Resources/Modes'
 modePathList = os.listdir(folderModePath)                                   # gets name of all images in folderModePath
 imgModeList = []
 for path in modePathList:
-    imgModeList.append(cv2.imread(os.path.join(folderModePath,path)))       # creates link to imgs in Resources
+    imgModeList.append(cv2.imread(os.path.join(folderModePath,path)))       # creates list of images in Resources
 # print(len(imgModeList))       # 4
+
+
 
 # UI
 while True:
