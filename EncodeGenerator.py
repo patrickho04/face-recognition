@@ -2,6 +2,16 @@ import cv2
 import face_recognition
 import pickle
 import os
+import firebase_admin
+from firebase_admin import db
+from firebase_admin import storage
+from firebase_admin import credentials
+
+cred = credentials.Certificate("serviceAccountKey.json")
+firebase_admin.initialize_app(cred, {
+    'databaseURL': 'https://attendance-system-5a6cb-default-rtdb.firebaseio.com/',
+    'storageBucket': 'attendance-system-5a6cb.appspot.com'
+})
 
 # Importing face images into a list
 folderImgPath = 'Images'
@@ -11,6 +21,14 @@ studentIDs = []
 for path in imgPathList:
     imgList.append(cv2.imread(os.path.join(folderImgPath,path)))            # creates list of face images
     # os.path.splitext(path) + splits <name>.jpeg to ('<name>', '.jpeg')
+
+    # send images to Firebase storage
+    fileName = f'{folderImgPath}/{path}'
+    bucket = storage.bucket()
+    blob = bucket.blob(fileName)
+    blob.upload_from_filename(fileName)
+
+    # make list of student IDs
     studentID = os.path.splitext(path)[0]
     studentIDs.append(studentID)
 
