@@ -4,6 +4,19 @@ import cv2  # for cam
 import face_recognition
 import numpy as np
 import cvzone
+import firebase_admin
+from firebase_admin import db
+from firebase_admin import storage
+from firebase_admin import credentials
+from datetime import datetime
+
+cred = credentials.Certificate("serviceAccountKey.json")
+firebase_admin.initialize_app(cred, {
+    'databaseURL': 'https://attendance-system-5a6cb-default-rtdb.firebaseio.com/',
+    'storageBucket': 'attendance-system-5a6cb.appspot.com'
+})
+
+bucket = storage.bucket()
 
 cap = cv2.VideoCapture(0)               # open cam
 cap.set(3, 640)                         # x pixels
@@ -16,7 +29,7 @@ folderModePath = 'Resources/Modes'
 modePathList = os.listdir(folderModePath)                                   # gets name of all images in folderModePath
 imgModeList = []
 for path in modePathList:
-    imgModeList.append(cv2.imread(os.path.join(folderModePath,path)))       # creates list of images in Resources
+    imgModeList.append(cv2.imread(os.path.join(folderModePath,path)))       # creates list of mode images in Resources
 
 # Importing encoding file
 print("Loading Encode File...")
@@ -25,6 +38,11 @@ encodeListKnownWithIDs = pickle.load(file)
 file.close()
 encodeListKnown, studentIDs = encodeListKnownWithIDs
 print("Encode File Loaded")
+
+modeType = 3
+counter = 0
+studentID = -1
+imgStudent = []
 
 # UI
 while True:
@@ -40,7 +58,7 @@ while True:
     encodeCurFrame = face_recognition.face_encodings(imgS, faceCurFrame)
 
     imgBackground[162:162+480, 55:55+640] = img                 # setting pixels on imgBackground to cam for overlay
-    imgBackground[44:44+633, 808:808+414] = imgModeList[1]      # mode overlay (3:active 2:marked  1:student data  0:already marked)
+    imgBackground[44:44+633, 808:808+414] = imgModeList[modeType]      # mode overlay (3:active 2:marked  1:student data  0:already marked)
 
     # search for saved faces
     for encodeFace, faceLoc in zip(encodeCurFrame, faceCurFrame):
@@ -48,13 +66,79 @@ while True:
         faceDistance = face_recognition.face_distance(encodeListKnown, encodeFace)          # measures how close face is too image data (lower is more accurate)
 
         matchIdx = np.argmin(faceDistance)
+
+        # check if face can be detected
         if matches[matchIdx]:
             # print("Known Face Detected")
-            print(studentIDs[matchIdx])
+            # print(studentIDs[matchIdx])
             y1,x2,y2,x1 = faceLoc
             y1, x2, y2, x1 = y1*4,x2*4,y2*4,x1*4
             bbox = 55+x1, 162+y1, x2-x1, y2-y1
             imgBackground = cvzone.cornerRect(imgBackground, bbox, rt=0)        # green square around face
+
+            studentID = studentIDs[matchIdx]
+            if counter == 0:
+                counter = 1
+                modeType = 1
+
+        if counter != 0:
+
+            if counter == 1:
+                # download student data from FireBase
+                studentInfo = db.reference(f'Students/{studentID}').get()
+                print(studentInfo)
+
+                # update attendance
+                datetimeObj = datetime.strptime(studentInfo['last_attendance_time'],
+                                               "%Y-%m-%d %H:%M:%S")                     # check date
+                secondsPassed = (datetime.now()-datetimeObj).total_seconds()
+                # print(secondsPassed)
+                if secondsPassed > 30:
+                    ref = db.reference(f'Students/{studentID}')
+                    studentInfo['total_attendance'] += 1
+                    ref.child('total_attendance').set(studentInfo['total_attendance'])
+                    ref.child('last_attendance_time').set(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                else:
+                    counter = 0
+                    modeType = 0
+                    imgBackground[44:44 + 633, 808:808 + 414] = imgModeList[modeType]
+
+        if modeType != 0:
+
+            if 10 < counter < 40:
+                modeType = 2
+
+            imgBackground[44:44 + 633, 808:808 + 414] = imgModeList[modeType]  # mode overlay (3:active 2:marked  1:student data  0:already marked)
+
+            if counter <= 10:
+                # show data
+                cv2.putText(imgBackground, str(studentInfo['total_attendance']), (861,125),
+                            cv2.FONT_HERSHEY_COMPLEX, 1, (255,255,255), 1)
+                cv2.putText(imgBackground, str(studentInfo['major']), (1006, 550),
+                            cv2.FONT_HERSHEY_COMPLEX, 0.5, (255, 255, 255), 1)
+                cv2.putText(imgBackground, str(studentID), (1006, 493),
+                            cv2.FONT_HERSHEY_COMPLEX, 0.5, (255, 255, 255), 1)
+                cv2.putText(imgBackground, str(studentInfo['standing']), (910, 625),
+                            cv2.FONT_HERSHEY_COMPLEX, 0.6, (100, 100, 100), 1)
+                cv2.putText(imgBackground, str(studentInfo['year']), (1025, 625),
+                            cv2.FONT_HERSHEY_COMPLEX, 0.6, (100, 100, 100), 1)
+                cv2.putText(imgBackground, str(studentInfo['starting_year']), (1125, 625),
+                            cv2.FONT_HERSHEY_COMPLEX, 0.6, (100, 100, 100), 1)
+
+                # center name
+                (w, h), _ = cv2.getTextSize(studentInfo['name'], cv2.FONT_HERSHEY_COMPLEX, 1, 1)
+                offset = (414-w)//2                         # (width of student info mode img - width of name)//2
+                cv2.putText(imgBackground, str(studentInfo['name']), (808+offset, 445),
+                            cv2.FONT_HERSHEY_COMPLEX, 1, (50, 50, 50), 1)
+
+            counter += 1
+
+            if counter >= 40:
+                counter = 0
+                modeType = 3
+                studentInfo = []
+                imgBackground[44:44 + 633, 808:808 + 414] = imgModeList[modeType]  # mode overlay (3:active 2:marked  1:student data  0:already marked)
+
 
     # Graphics
     cv2.imshow("Face Attendance", imgBackground)
